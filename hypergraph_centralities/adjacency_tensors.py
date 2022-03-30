@@ -57,7 +57,7 @@ def edge_list_to_tensor( edges:np.ndarray  ):
     return ar
 
 
-def generate_sunflower_HG( k=4, r=5 ):
+def generate_sunflower_HG( k:int=4, r:int=5 ):
     """
     This function returns the adjacency tensor of a k-uniform sunflower hypergraph with r petals. See Figure 1 in [1]
     for a visualization of this graph.
