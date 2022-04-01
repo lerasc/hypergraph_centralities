@@ -3,11 +3,13 @@ import numpy  as np
 import pandas as pd
 import xarray as xr
 
+from itertools import product
 
-def edge_list_to_tensor( edges:np.ndarray  ):
+
+def edge_list_to_tensor( edges:np.ndarray  ) -> xr.DataArray:
     """
     Given a list of edges representing a k-uniform hypergraph, this function returns the associated k-dimensional
-    adjacency tensor. We use xarray to represent tensors. See [1] for good tutorials on xarray.
+    adjacency tensor.
 
     input:
     -----
@@ -17,9 +19,10 @@ def edge_list_to_tensor( edges:np.ndarray  ):
     ------
     T:      k-dimensional tensor representing the hypergraph's adjacency matrix.
 
-    references:
-    ----------
-    [1] https://github.com/xarray-contrib/xarray-tutorial
+
+    details:
+    -------
+    -   We use xarray to represent tensors. See [1] for tutorials on how to work with xarray.
 
     example:
     -------
@@ -37,6 +40,10 @@ def edge_list_to_tensor( edges:np.ndarray  ):
 
     >>> T.sel(dim_1='a', dim_2='b', dim_3='c').values  # = 1 since there is an (a,b,c)-edge
     >>> T.sel(dim_1='a', dim_2='b', dim_3='e').values  # = 0 since there is no (a,b,e)-edge
+
+    references:
+    ----------
+    [1] https://github.com/xarray-contrib/xarray-tutorial
     """
 
     # check that input is provided in correct format
@@ -44,6 +51,8 @@ def edge_list_to_tensor( edges:np.ndarray  ):
     assert isinstance(edges, np.ndarray), 'edges must be numpy array'
     assert len(edges.shape)==2, 'edges must be two-dimensional array'
 
+    # transform list of edges into an m-uniform n-dimensional tensor.
+    ####################################################################################################################
     n, k    = edges.shape                                               # n = nr of edges, degree of edges
     nodes   = list(np.unique(edges.flatten()))                          # list of all nodes
     mi      = pd.Series( 1, index=pd.MultiIndex.from_arrays(edges.T))   # multi-index, each edge is an index
@@ -57,7 +66,87 @@ def edge_list_to_tensor( edges:np.ndarray  ):
     return ar
 
 
-def generate_sunflower_HG( k:int=4, r:int=5 ):
+def apply( T :  xr.DataArray,
+           x :  pd.Series,
+           ) -> pd.Series:
+    """
+    Implementation of the 'apply'-operation which is important to calculate different hypergraph centrality measures.
+    See details below for a definition.
+
+    input:
+    -----
+    T:          An m-order n-dimensional tensor
+    x:          An n-dimensional vector
+
+    return:
+    ------
+    y:          an n-dimensional vector y = T x^{m-1}, see details below.
+
+    details:
+    -------
+    Consider an m-order n-dimensional tensor T with components
+        T_{j_1, j_2, ..., j_m} where j_i \in {1, 2, .., n}                                                 (1)
+    and an n-dimensional vector x with components x_i.
+    The apply function, abbreviated
+        y = T x^{m-1}                                                                                      (2)
+    results is an n-dimensional vector y with the i-th component given by
+        y_i = sum_{j_2, ..., j_m=1}^n T_{i, j_2, ..., j_m} * x_{j_2} * ...* x_{j_m},                       (3)
+    see for instance equation (1.2) in paper [1] for details.
+    It is straight forward to verify that the case m=2 corresponds to the standard matrix-vector
+    multiplication. For m=3, the transformation reads
+        y_i = sum_{j, k = 1}^n T_{i,j,k} x_i x_k.                                                          (4)
+
+
+    example 1:
+    ---------
+    Add here an example of a matrix multiplication and compare
+    >>>
+
+    example 2:
+    ---------
+    Add here an example of a 3d operation and compare with explicit implementation
+    >>> combs = product( range(n), range(n) )
+    >>> for i in range(n):  y[i] = sum([ T[i,j,k] * x[j] * x[k] for (j,k) in combs ])
+
+    references:
+    ----------
+    [1] 2010 - Ng et al. - Finding the largest eigenvalue of a nonnegative tensor
+    """
+
+    # check that input is provided in correct format and initialize some variables
+    ####################################################################################################################
+    assert isinstance( T, xr.DataArray ),       'tensor T must be an xarray'
+    assert isinstance( x, pd.Series ),          'input vector x must be a pandas Series'
+    for dim in T.shape: assert dim==T.shape[0], 'T must be m-uniform, n-dimensional tensor'
+    assert len(T.shape) >= 2,                   'T mus be at least 2-uniform'
+
+    # intialize some basic variables
+    ####################################################################################################################
+    m     = len( T.shape )                                      # tensor dimensionality
+    n     = T.shape[0]                                          # number of values along each dimension
+    y     = np.nan * np.zeros(n)                                # initialize result of apply transform
+    combs = list(product(*[ range(n) for _ in range(m-1) ]))    # all index-combinations to sum across
+
+    # iterate each component and calculate the apply-function, cf. equation (3)
+    ####################################################################################################################
+    for i in range(n):                                               # calculate each component of T x^{m-1}
+
+        sT   = T[i].values                                           # sub-tensor T_{i, :}
+        y[i] = sum([                                                 # sum across all index constellations
+                        sT[comb]                                     # prefactor T_{i, j_2, ..., j_m}
+                        *
+                        np.product([ x.iloc[l] for l in comb ])      # x_{j_2} * ...* x_{j_m}
+                        for comb in combs                            # interate all index-combinations j_2 ... j_m
+                        ])
+
+    y = pd.Series(y, index=x.index)                                  # add names as index
+
+    return y
+
+
+def generate_sunflower_HG(  k : int=4,
+                            r : int=5,
+                            ) -> xr.DataArray:
     """
     This function returns the adjacency tensor of a k-uniform sunflower hypergraph with r petals. See Figure 1 in [1]
     for a visualization of this graph.
