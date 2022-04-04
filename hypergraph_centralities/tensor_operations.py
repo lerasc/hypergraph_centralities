@@ -76,11 +76,11 @@ def apply( T :  xr.DataArray,
     input:
     -----
     T:          An m-order n-dimensional tensor
-    x:          An n-dimensional vector
+    x:          An n-dimensional vector (the index of must match the index of :param T:)
 
     return:
     ------
-    y:          an n-dimensional vector y = T x^{m-1}, see details below.
+    y:          an n-dimensional vector y := T x^{m-1}, see details below.
 
     details:
     -------
@@ -99,26 +99,55 @@ def apply( T :  xr.DataArray,
 
     example 1:
     ---------
-    Add here an example of a matrix multiplication and compare
+    As a first example, we consider a 2-uniform tensor, i.e. a matrix. In that case, the apply function is the same
+    as a matrix-vector multiplication. The following test confirms this:
+
+    >>> edges = np.array([  ['a','b'],
+    >>>                     ['b','c'],
+    >>>                     ['c','d'],
+    >>>                     ['a','d'],
+    >>>                             ])
+    >>> T  = edge_list_to_tensor( edges  )
+    >>> x  = pd.Series([ 1, 2, 3, 4 ], index=['a','b','c','d'])
+    >>> y1 = apply(  T, x ).values # special case of the apply-function for 2-uniform graph
+    >>> y2 = np.dot( T, x )        # simple matrix vector multiplication
     >>>
+    >>> print('y1=y2?', np.equal(y1,y2).all()) # indeed, y1 is the same as y2
 
     example 2:
     ---------
-    Add here an example of a 3d operation and compare with explicit implementation
-    >>> combs = product( range(n), range(n) )
-    >>> for i in range(n):  y[i] = sum([ T[i,j,k] * x[j] * x[k] for (j,k) in combs ])
+    As a second example, we consider a 3-uniofrm tensor. In that case, we can also implement equation (3) more
+    explicitly via equation (4). Here, we compare that the results are the same.
+
+    >>> edges = np.array([  ['a','b','c'],
+    >>>                     ['b','c','d'],
+    >>>                     ['c','d','e'],
+    >>>                     ['d','e','b'],
+    >>>                     ['a','c','d'],
+    >>>                                 ])
+    >>> T     = edge_list_to_tensor( edges  )
+    >>> x     = pd.Series([ 1, 2, 3, 4, 5 ], index=['a','b','c','d','e'])
+    >>> y1    = apply( T, x ).values # apply-transform (3)
+    >>> combs = list(product( range(5), range(5) )) # all parameter combinations (j,k) to sum over
+    >>> y2    = np.array([ sum([ T[i,j,k] * x[j] * x[k] for (j,k) in combs ]) for i in range(5) ]) # equation (4)
+    >>>
+    >>> print('y1=y2?', np.equal(y1,y2).all()) # indeed, y1 is the same as y2
 
     references:
     ----------
     [1] 2010 - Ng et al. - Finding the largest eigenvalue of a nonnegative tensor
     """
 
-    # check that input is provided in correct format and initialize some variables
+    # check that input is provided in correct format
     ####################################################################################################################
-    assert isinstance( T, xr.DataArray ),       'tensor T must be an xarray'
-    assert isinstance( x, pd.Series ),          'input vector x must be a pandas Series'
-    for dim in T.shape: assert dim==T.shape[0], 'T must be m-uniform, n-dimensional tensor'
-    assert len(T.shape) >= 2,                   'T mus be at least 2-uniform'
+    assert isinstance( T, xr.DataArray ),                 'tensor T must be an xarray'
+    for dim in T.shape: assert dim==T.shape[0],           'T must be m-uniform, n-dimensional tensor'
+    assert len(T.shape) >= 2,                             'T must be at least 2-uniform'
+    indices = list(T.indexes.values())                    # indices along each dimension
+    for ind in indices: assert ind.equals(indices[0]),    'indices along each dimension must be the same'
+
+    assert isinstance( x, pd.Series ),                    'input vector x must be a pandas Series'
+    assert x.index.equals( indices[0] ),                  'x must have same index as T'
 
     # intialize some basic variables
     ####################################################################################################################
@@ -144,17 +173,17 @@ def apply( T :  xr.DataArray,
     return y
 
 
-def generate_sunflower_HG(  k : int=4,
+def generate_sunflower_HG(  m : int=4,
                             r : int=5,
                             ) -> xr.DataArray:
     """
-    This function returns the adjacency tensor of a k-uniform sunflower hypergraph with r petals. See Figure 1 in [1]
+    This function returns the adjacency tensor of an m-uniform sunflower hypergraph with r petals. See Figure 1 in [1]
     for a visualization of this graph.
 
     [1] 2019 - Benson - Three hypergraph eigenvector centralities
     """
 
-    nr_nodes  = (k-1)*r + 1                            # number of nodes of sunfolder (+1 accounts for core)
+    nr_nodes  = (m-1)*r + 1                            # number of nodes of sunfolder (+1 accounts for core)
     last_node = nr_nodes - 1                           # name of core node, its the last one, we start counting from 0
     edges     = np.arange(nr_nodes-1)                  # all nodes except core
     edges     = np.array_split(edges, r)               # split into r petals (no core attached yet)
