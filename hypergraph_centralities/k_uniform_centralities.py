@@ -132,3 +132,4 @@ def get_irreducible_subcomponents( T ):
     dims     = list(T.indexes.keys())                                         # name of all dimensions
     sub_ds   = [ dict([ (dim,list(SG)) for dim in dims ]) for SG in sub_Gs ]  # list of indices of connected components
     sub_Ts   = [ T.sel(sub_dim) for sub_dim in sub_ds ]                       # select connected sub-hyper-graphs
+    

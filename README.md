@@ -1,7 +1,9 @@
-Implementation of hypergraph centrality measures. 
 
-Several centrality measures for k-uniform hypergraphs are implemented, as detailed in [1]. 
-A centrality measure applicable to general hypergraphs is implemented based on the algorithm suggested in [2]. 
+Implementation of hypergraph H-centrality for k-uniform hypergraphs. 
+See [1,2] for details on hypergraph centralities. 
+A centrality measure applicable to general hypergraphs is suggested in [3].
+This is not yet implemented, but will probably be added later. 
 
-[1]	2019 - Benson - Three hypergraph eigenvector centralities
-[2] 2021 - Tudisco, Higham - Node and edge nonlinear eigenvector centrality for hypergraphs
+[1] 2010 - Ng et al. 	   - Finding the largest eigenvalue of a nonnegative tensor
+[2]	2019 - Benson 		   - Three hypergraph eigenvector centralities
+[3] 2021 - Tudisco, Higham - Node and edge nonlinear eigenvector centrality for hypergraphs
