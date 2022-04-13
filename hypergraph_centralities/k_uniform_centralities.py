@@ -1,10 +1,11 @@
 
-import numpy  as np
-import pandas as pd
-import xarray as xr
+import numpy    as np
+import pandas   as pd
+import xarray   as xr
+import networkx as nx
 
 from scipy.linalg      import norm
-from tensor_operations import apply, generate_sunflower_HG
+from tensor_operations import edge_list_to_tensor, apply, clique_exansion
 
 
 def H_centrality( T :       xr.DataArray,
@@ -42,12 +43,12 @@ def H_centrality( T :       xr.DataArray,
     most central node and all other ones (see [2] for a derivation).  Here, we compare numerical and analytical
     implementation.
 
-    >>> k, r   = 4, 5
-    >>> T      = generate_sunflower_HG( k=k, r=r )
+    >>> m, r   = 4, 5
+    >>> T      = generate_sunflower_HG( m=m, r=r )
     >>> c      = H_centrality( T )
-    >>> r_n    = c.loc[?] / c.loc[0]
-    >>> r_a    = r**(1/k)
-    >>> print('analytical equal numerical?', np.equal(r_n, r_a)) # indeed, the ratios are the same
+    >>> r_n    = c.iloc[-1] / c.iloc[0]
+    >>> r_a    = r**(1/m)
+    >>> print('analytical equal numerical?', np.isclose(r_n, r_a, atol=1e-4)) # indeed, the ratios are the same
 
     references:
     ----------
@@ -83,3 +84,51 @@ def H_centrality( T :       xr.DataArray,
         if converged:  return c                        # stop iterating once converged
 
     raise ValueError(f'No convergence after {maxiter}-iterations. Note that T must be irreducible.')
+
+
+def generate_sunflower_HG(  m : int=4,
+                            r : int=5,
+                            ) -> xr.DataArray:
+    """
+    This function returns the adjacency tensor of an m-uniform sunflower hypergraph with r petals. See Figure 1 in [1]
+    for a visualization of this graph.
+
+    [1] 2019 - Benson - Three hypergraph eigenvector centralities
+    """
+
+    nr_nodes  = (m-1)*r + 1                            # number of nodes of sunfolder (+1 accounts for core)
+    last_node = nr_nodes - 1                           # name of core node, its the last one, we start counting from 0
+    edges     = np.arange(nr_nodes-1)                  # all nodes except core
+    edges     = np.array_split(edges, r)               # split into r petals (no core attached yet)
+    edges     = [ list(e)+[last_node] for e in edges ] # append core to every petal
+    edges     = np.array(edges)                        # requred format for edge_list_to_tensor
+    T         = edge_list_to_tensor( edges )           # reshape into tensor
+
+    return T
+
+
+def get_irreducible_subcomponents( T ):
+    """
+    The centrality measures are only well-defined if the adjacency tensor is irreducible [1]. Here, we check if the
+    tensor is irreducible as follows: First, we use a clique-expansion to turn the hypergraph into a network.
+    Subsequently, we check if the associated adjacency matrix is reducible.
+
+    input:
+    -----
+    T:          An m-order n-dimensional tensor (e.g. output from edge_list_to_tensor)
+
+    output:
+    ------
+    sub_Ts:     list of fully connected sub-hypergraphs of T.
+
+    references:
+    ----------
+    [1] 2010 - Ng et al. - Finding the largest eigenvalue of a nonnegative tensor
+    """
+
+    A        = clique_exansion( T )                                           # adjacency matrix of clique exp. of T
+    G        = nx.from_pandas_adjacency(A)                                    # turn into networkx object
+    sub_Gs   = list(nx.connected_components(G))                               # list of all connected components
+    dims     = list(T.indexes.keys())                                         # name of all dimensions
+    sub_ds   = [ dict([ (dim,list(SG)) for dim in dims ]) for SG in sub_Gs ]  # list of indices of connected components
+    sub_Ts   = [ T.sel(sub_dim) for sub_dim in sub_ds ]                       # select connected sub-hyper-graphs

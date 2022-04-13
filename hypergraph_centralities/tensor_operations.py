@@ -3,7 +3,7 @@ import numpy  as np
 import pandas as pd
 import xarray as xr
 
-from itertools import product
+from itertools import product, permutations
 
 
 def edge_list_to_tensor( edges:np.ndarray  ) -> xr.DataArray:
@@ -53,7 +53,11 @@ def edge_list_to_tensor( edges:np.ndarray  ) -> xr.DataArray:
 
     # transform list of edges into an m-uniform n-dimensional tensor.
     ####################################################################################################################
-    n, k    = edges.shape                                               # n = nr of edges, degree of edges
+    edges   = list(edges)                                               # list of all edges
+    edges   = [ np.vstack(list(permutations(e))) for e in edges ]       # form all combinations, i.e. 'undirected edge'
+    edges   = np.vstack( edges )                                        # stack back together
+    edges   = pd.DataFrame(edges).drop_duplicates(keep='first').values  # drop duplicates
+    _, k    = edges.shape                                               # n = nr of edges, degree of edges
     nodes   = list(np.unique(edges.flatten()))                          # list of all nodes
     mi      = pd.Series( 1, index=pd.MultiIndex.from_arrays(edges.T))   # multi-index, each edge is an index
     ar      = xr.DataArray.from_series(mi)                              # create k-dimensional array
@@ -62,6 +66,7 @@ def edge_list_to_tensor( edges:np.ndarray  ) -> xr.DataArray:
     indices = dict([(f'dim_{k+1}',nodes) for k in range(k)])            # make each dimension of same shape
     ar      = ar.reindex(indices)                                       # make each dimesnion of same shape
     ar      = ar.fillna(0)                                              # repalce NaN by 0
+
 
     return ar
 
@@ -75,7 +80,7 @@ def apply( T :  xr.DataArray,
 
     input:
     -----
-    T:          An m-order n-dimensional tensor
+    T:          An m-order n-dimensional tensor (e.g. output from edge_list_to_tensor)
     x:          An n-dimensional vector (the index of must match the index of :param T:)
 
     return:
@@ -173,22 +178,44 @@ def apply( T :  xr.DataArray,
     return y
 
 
-def generate_sunflower_HG(  m : int=4,
-                            r : int=5,
-                            ) -> xr.DataArray:
+def clique_exansion( T : xr.DataArray ) -> pd.DataFrame:
     """
-    This function returns the adjacency tensor of an m-uniform sunflower hypergraph with r petals. See Figure 1 in [1]
-    for a visualization of this graph.
+    The clique expansion algorithm construcs a graph from the original hypergraph by replacing each hyperedge with an
+    edge for each pair of vertices in the hyperedge [1,2].
 
-    [1] 2019 - Benson - Three hypergraph eigenvector centralities
+    inputs:
+    ------
+    T:          An m-order n-dimensional tensor (e.g. output from edge_list_to_tensor)
+
+    return:
+    ------
+    A:          Matrix that can be interpreted as weighted adjacency matrix. The entry at position (i,j) represents
+                the number of hyper-edges that encompass both node i and node j.
+
+
+    references:
+    ----------
+    [1] Zien et. al. Multi-level spectral hypergraph partitioning with arbitrary vertex sizes. IEEE Transactions on
+        Computer-Aided Design of Integrated Circuits and Systems, 18, 1389–1399. (1999)
+
+    [2] Agarwal et. al. Higher order learning with graphs. In Proceedings of the 23rd International Conference on
+        achine Learning, 17–24 (2006).
     """
 
-    nr_nodes  = (m-1)*r + 1                            # number of nodes of sunfolder (+1 accounts for core)
-    last_node = nr_nodes - 1                           # name of core node, its the last one, we start counting from 0
-    edges     = np.arange(nr_nodes-1)                  # all nodes except core
-    edges     = np.array_split(edges, r)               # split into r petals (no core attached yet)
-    edges     = [ list(e)+[last_node] for e in edges ] # append core to every petal
-    edges     = np.array(edges)                        # requred format for edge_list_to_tensor
-    T         = edge_list_to_tensor( edges )           # reshape into tensor
+    # check that input is provided in correct format
+    ####################################################################################################################
+    assert isinstance( T, xr.DataArray ),                 'tensor T must be an xarray'
+    for dim in T.shape: assert dim==T.shape[0],           'T must be m-uniform, n-dimensional tensor'
+    assert len(T.shape) >= 2,                             'T must be at least 2-uniform'
+    indices = list(T.indexes.values())                    # indices along each dimension
+    for ind in indices: assert ind.equals(indices[0]),    'indices along each dimension must be the same'
 
-    return T
+    # get clique-expanded adjacency matrix by summing across all but the first two dimensions
+    ####################################################################################################################
+    combs   = list(product(indices[0],indices[0]))                            # all node combinations (i,j)
+    weights = [ float( T.sel(dim_1=i, dim_2=j).sum() ) for (i,j) in combs ]   # weight = sum across all other dims
+    weights = pd.DataFrame( weights, index=pd.MultiIndex.from_tuples(combs) ) # make into DataFrame
+    weights = weights.reset_index()                                           # undo multi-index
+    weights = weights.pivot(index='level_0', columns='level_1', values=0)     # reshape into adjaccency matrix
+
+    return weights
