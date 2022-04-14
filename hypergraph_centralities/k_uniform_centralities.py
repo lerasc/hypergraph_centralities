@@ -2,7 +2,6 @@
 import numpy    as np
 import pandas   as pd
 import xarray   as xr
-import networkx as nx
 
 from scipy.linalg      import norm
 from tensor_operations import edge_list_to_tensor, apply, clique_exansion
@@ -77,7 +76,7 @@ def H_centrality( T :       xr.DataArray,
 
         y_scaled  = y**(1/(m-1))                       # rescale the apply-transform
         c         = y_scaled / norm(y_scaled, 1)       # renormalize to get next interation of eigenvector approximation
-        y         = apply( T, c )                      # apply next transform
+        y         = apply_parallel( T, c )             # apply next transform
         s         = y / c**(m-1)                       # difference between current candiate and rescaled next iteration
         converged = (max(s) - min(s)) / min(s) < tol   # are all entries in y and c^{m-1} roughly the same?
 
@@ -107,29 +106,12 @@ def generate_sunflower_HG(  m : int=4,
     return T
 
 
-def get_irreducible_subcomponents( T ):
-    """
-    The centrality measures are only well-defined if the adjacency tensor is irreducible [1]. Here, we check if the
-    tensor is irreducible as follows: First, we use a clique-expansion to turn the hypergraph into a network.
-    Subsequently, we check if the associated adjacency matrix is reducible.
+if __name__=='__main__':
 
-    input:
-    -----
-    T:          An m-order n-dimensional tensor (e.g. output from edge_list_to_tensor)
+    T = generate_sunflower_HG( m=4, r=5 )
+    x = pd.Series( np.arange(1, T.shape[0]+1), index=np.arange(T.shape[0]) )
+    print(apply( i=None, T=T, x=x ))
 
-    output:
-    ------
-    sub_Ts:     list of fully connected sub-hypergraphs of T.
+    from tensor_operations import apply_parallel
 
-    references:
-    ----------
-    [1] 2010 - Ng et al. - Finding the largest eigenvalue of a nonnegative tensor
-    """
-
-    A        = clique_exansion( T )                                           # adjacency matrix of clique exp. of T
-    G        = nx.from_pandas_adjacency(A)                                    # turn into networkx object
-    sub_Gs   = list(nx.connected_components(G))                               # list of all connected components
-    dims     = list(T.indexes.keys())                                         # name of all dimensions
-    sub_ds   = [ dict([ (dim,list(SG)) for dim in dims ]) for SG in sub_Gs ]  # list of indices of connected components
-    sub_Ts   = [ T.sel(sub_dim) for sub_dim in sub_ds ]                       # select connected sub-hyper-graphs
-    
+    print(apply_parallel(T=T, x=x))

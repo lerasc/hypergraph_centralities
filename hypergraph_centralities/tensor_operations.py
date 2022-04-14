@@ -1,9 +1,12 @@
 
-import numpy  as np
-import pandas as pd
-import xarray as xr
+import numpy           as np
+import pandas          as pd
+import xarray          as xr
+import networkx        as nx
+import multiprocessing as mp 
 
 from itertools import product, permutations
+from functools import partial 
 
 
 def edge_list_to_tensor( edges:np.ndarray  ) -> xr.DataArray:
@@ -73,15 +76,18 @@ def edge_list_to_tensor( edges:np.ndarray  ) -> xr.DataArray:
 
 def apply( T :  xr.DataArray,
            x :  pd.Series,
+           i =  None,
            ) -> pd.Series:
     """
-    Implementation of the 'apply'-operation which is important to calculate different hypergraph centrality measures.
+    Implementation of the 'apply'-operation y = T x^{m-1} which is important to calculate hypergraph centralities.
     See details below for a definition.
 
     input:
     -----
     T:          An m-order n-dimensional tensor (e.g. output from edge_list_to_tensor)
     x:          An n-dimensional vector (the index of must match the index of :param T:)
+    i:          If None, calculate entry vector y. Else, calculate only the i-th component. This is useful to 
+                call the apply-function in parallel for different components (cf. apply_parallel below).
 
     return:
     ------
@@ -154,8 +160,11 @@ def apply( T :  xr.DataArray,
     assert isinstance( x, pd.Series ),                    'input vector x must be a pandas Series'
     assert x.index.equals( indices[0] ),                  'x must have same index as T'
 
+    if i is not None: 
+        assert i >= 0 and i < T.shape[0],                 'if i is not None, i must not be larger than dimension of y'
+
     # intialize some basic variables
-    ####################################################################################################################
+    #########################,###########################################################################################
     m     = len( T.shape )                                      # tensor dimensionality
     n     = T.shape[0]                                          # number of values along each dimension
     y     = np.nan * np.zeros(n)                                # initialize result of apply transform
@@ -163,6 +172,8 @@ def apply( T :  xr.DataArray,
 
     # iterate each component and calculate the apply-function, cf. equation (3)
     ####################################################################################################################
+    ivals = np.arange(n) if i is None else [i]                       # which components to calculate
+
     for i in range(n):                                               # calculate each component of T x^{m-1}
 
         sT   = T[i].values                                           # sub-tensor T_{i, :}
@@ -173,9 +184,29 @@ def apply( T :  xr.DataArray,
                         for comb in combs                            # interate all index-combinations j_2 ... j_m
                         ])
 
-    y = pd.Series(y, index=x.index)                                  # add names as index
+    y = pd.Series(y[ivals], index=x.index[ivals])                    # add names as index if all components a
 
     return y
+
+
+def apply_parallel(T :  xr.DataArray,
+                   x :  pd.Series,
+                   ) -> pd.Series:
+    """
+    Same as apply-function above, but with parallel execution along the components of y. This is useful since for large
+    shapes of T, the apply function is very slow.
+    """
+
+    ivals    = np.arange(T.shape[0])                         # all components of interest
+    func     = partial( apply, *[T,x] )                      # fix all arguments but the component
+    nc       = mp.cpu_count() - 1                            # number of cores + 1 reserve
+    pool     = mp.Pool(processes=nc)                         # initialize mp instance
+    y        = pool.map( func, ivals )                       # run in parallel
+    y        = pd.concat(y, axis='index')                    # merge all components into one axis
+    _        = pool.close()                                  # close mp instance
+    _        = pool.join()                                   # close mp instances
+
+    return y 
 
 
 def clique_exansion( T : xr.DataArray ) -> pd.DataFrame:
@@ -206,7 +237,7 @@ def clique_exansion( T : xr.DataArray ) -> pd.DataFrame:
     ####################################################################################################################
     assert isinstance( T, xr.DataArray ),                 'tensor T must be an xarray'
     for dim in T.shape: assert dim==T.shape[0],           'T must be m-uniform, n-dimensional tensor'
-    assert len(T.shape) >= 2,                             'T must be at least 2-uniform'
+    assert len(T.shape) >= 3,                             'T must be at least 3-uniform'
     indices = list(T.indexes.values())                    # indices along each dimension
     for ind in indices: assert ind.equals(indices[0]),    'indices along each dimension must be the same'
 
@@ -219,3 +250,32 @@ def clique_exansion( T : xr.DataArray ) -> pd.DataFrame:
     weights = weights.pivot(index='level_0', columns='level_1', values=0)     # reshape into adjaccency matrix
 
     return weights
+
+
+def get_irreducible_subcomponents( T ):
+    """
+    The centrality measures are only well-defined if the adjacency tensor is irreducible [1]. Here, we check if the
+    tensor is irreducible as follows: First, we use a clique-expansion to turn the hypergraph into a network.
+    Subsequently, we check if the associated adjacency matrix is reducible.
+
+    input:
+    -----
+    T:          An m-order n-dimensional tensor (e.g. output from edge_list_to_tensor)
+
+    output:
+    ------
+    sub_Ts:     list of fully connected sub-hypergraphs of T.
+
+    references:
+    ----------
+    [1] 2010 - Ng et al. - Finding the largest eigenvalue of a nonnegative tensor
+    """
+
+    A        = clique_exansion( T )                                           # adjacency matrix of clique exp. of T
+    G        = nx.from_pandas_adjacency(A)                                    # turn into networkx object
+    sub_Gs   = list(nx.connected_components(G))                               # list of all connected components
+    dims     = list(T.indexes.keys())                                         # name of all dimensions
+    sub_ds   = [ dict([ (dim,list(SG)) for dim in dims ]) for SG in sub_Gs ]  # list of indices of connected components
+    sub_Ts   = [ T.sel(sub_dim) for sub_dim in sub_ds ]                       # select connected sub-hyper-graphs
+
+    return sub_Ts
