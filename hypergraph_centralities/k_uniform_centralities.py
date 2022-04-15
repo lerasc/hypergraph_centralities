@@ -3,8 +3,8 @@ import numpy    as np
 import pandas   as pd
 import xarray   as xr
 
-from scipy.linalg      import norm
-from tensor_operations import edge_list_to_tensor, apply, clique_exansion
+from scipy.linalg  import norm
+from hypergraph_centralities.tensor_operations import edge_list_to_tensor, apply, apply_parallel
 
 
 def H_centrality( T :       xr.DataArray,

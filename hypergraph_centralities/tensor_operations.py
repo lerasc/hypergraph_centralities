@@ -216,7 +216,7 @@ def clique_exansion( T : xr.DataArray ) -> pd.DataFrame:
 
     inputs:
     ------
-    T:          An m-order n-dimensional tensor (e.g. output from edge_list_to_tensor)
+    T:          An m-order n-dimensional tensor (e.g. output from edge_list_to_tensor). m >=3 is required.
 
     return:
     ------
@@ -237,9 +237,18 @@ def clique_exansion( T : xr.DataArray ) -> pd.DataFrame:
     ####################################################################################################################
     assert isinstance( T, xr.DataArray ),                 'tensor T must be an xarray'
     for dim in T.shape: assert dim==T.shape[0],           'T must be m-uniform, n-dimensional tensor'
-    assert len(T.shape) >= 3,                             'T must be at least 3-uniform'
+    assert len(T.shape) >= 2,                             'T must be at least 2-uniform'
     indices = list(T.indexes.values())                    # indices along each dimension
     for ind in indices: assert ind.equals(indices[0]),    'indices along each dimension must be the same'
+
+    # the 2-uniform case is special: we already have a matrix, so we must just transform the 2-d xarray tensor.
+    ####################################################################################################################
+    if len(T.shape)==2:
+
+        dim1    = list(T.coords)[0]                                               # name of the first dimension
+        weights = pd.DataFrame( T, index=T.coords[dim1], columns=T.coords[dim1] ) # transform to DataFrame
+
+        return weights
 
     # get clique-expanded adjacency matrix by summing across all but the first two dimensions
     ####################################################################################################################
@@ -271,11 +280,13 @@ def get_irreducible_subcomponents( T ):
     [1] 2010 - Ng et al. - Finding the largest eigenvalue of a nonnegative tensor
     """
 
-    A        = clique_exansion( T )                                           # adjacency matrix of clique exp. of T
+    A        = clique_exansion( T )                                          # adjacency matrix of clique exp. of T
     G        = nx.from_pandas_adjacency(A)                                    # turn into networkx object
     sub_Gs   = list(nx.connected_components(G))                               # list of all connected components
     dims     = list(T.indexes.keys())                                         # name of all dimensions
     sub_ds   = [ dict([ (dim,list(SG)) for dim in dims ]) for SG in sub_Gs ]  # list of indices of connected components
     sub_Ts   = [ T.sel(sub_dim) for sub_dim in sub_ds ]                       # select connected sub-hyper-graphs
+    lengths  = [ T.shape[0] for T in sub_Ts ]                                 # size of each component
+    sub_Ts   = [ sub_Ts[i] for i in np.argsort(lengths) ]                     # arrange in ascending order
 
     return sub_Ts
