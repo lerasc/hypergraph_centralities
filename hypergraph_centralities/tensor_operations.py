@@ -57,7 +57,7 @@ def edge_list_to_tensor( edges:np.ndarray  ) -> xr.DataArray:
     # transform list of edges into an m-uniform n-dimensional tensor.
     ####################################################################################################################
     edges   = list(edges)                                               # list of all edges
-    edges   = [ np.vstack(list(permutations(e))) for e in edges ]       # form all combinations, i.e. 'undirected edge'
+    edges   = [ np.vstack(list(permutations(e))) for e in edges ]       # form all combinations, i.e. make symmetric
     edges   = np.vstack( edges )                                        # stack back together
     edges   = pd.DataFrame(edges).drop_duplicates(keep='first').values  # drop duplicates
     _, k    = edges.shape                                               # n = nr of edges, degree of edges
@@ -209,10 +209,10 @@ def apply_parallel(T :  xr.DataArray,
     return y 
 
 
-def clique_exansion( T : xr.DataArray ) -> pd.DataFrame:
+def representative_matrix( T : xr.DataArray ) -> pd.DataFrame:
     """
-    The clique expansion algorithm construcs a graph from the original hypergraph by replacing each hyperedge with an
-    edge for each pair of vertices in the hyperedge [1,2].
+    The representative matrix of a hypergraph is a weighted adjacency matrix obtained as follows:
+    The edge weight between two nodes i and j is just the number of hyper-edges that A and B share [1,2].
 
     inputs:
     ------
@@ -257,30 +257,54 @@ def clique_exansion( T : xr.DataArray ) -> pd.DataFrame:
     weights = pd.DataFrame( weights, index=pd.MultiIndex.from_tuples(combs) ) # make into DataFrame
     weights = weights.reset_index()                                           # undo multi-index
     weights = weights.pivot(index='level_0', columns='level_1', values=0)     # reshape into adjaccency matrix
+    weights = weights + weights.T                                             # make symmetric
 
     return weights
 
 
-def get_irreducible_subcomponents( T ):
+def is_irreducible( T ):
     """
     The centrality measures are only well-defined if the adjacency tensor is irreducible [1]. Here, we check if the
-    tensor is irreducible as follows: First, we use a clique-expansion to turn the hypergraph into a network.
-    Subsequently, we check if the associated adjacency matrix is reducible.
+    tensor is irreducible as follows: First, we extract the representative matrix to turn the hypergraph into a network.
+    Subsequently, we check if the associated adjacency matrix is reducible. See Definition 2.2. in [2].
 
     input:
     -----
-    T:          An m-order n-dimensional tensor (e.g. output from edge_list_to_tensor)
+    T:             An m-order n-dimensional tensor (e.g. output from edge_list_to_tensor)
 
     output:
     ------
-    sub_Ts:     list of fully connected sub-hypergraphs of T.
+    irreducible:    Boolean that is True if tensor is irreducible and False else.
 
     references:
     ----------
     [1] 2010 - Ng et al. - Finding the largest eigenvalue of a nonnegative tensor
+    [2] 2019 - Benson -    Three hypergraph eigenvector centralities
     """
 
-    A        = clique_exansion( T )                                          # adjacency matrix of clique exp. of T
+    A           = representative_matrix(T)                     # adjacency matrix of clique exp. of T
+    G           = nx.from_pandas_adjacency(A)                  # turn into networkx object
+    sub_Gs      = list(nx.connected_components(G))             # list of all connected components
+    irreducible = True if len(sub_Gs)==1 else False
+
+    return irreducible
+
+
+def get_largest_connected_component( T ):
+    """
+    Given a tensor T, returns its largest connected component. See documentation in 'is_irreducible' function for
+    details on how this works.
+
+    input:
+    -----
+    T:             An m-order n-dimensional tensor (e.g. output from edge_list_to_tensor)
+
+    output:
+    ------
+    sT:           Sub-tensor of T that is irreducible (i.e. connected).
+    """
+
+    A        = representative_matrix( T )                                     # adjacency matrix of clique exp. of T
     G        = nx.from_pandas_adjacency(A)                                    # turn into networkx object
     sub_Gs   = list(nx.connected_components(G))                               # list of all connected components
     dims     = list(T.indexes.keys())                                         # name of all dimensions
@@ -288,5 +312,6 @@ def get_irreducible_subcomponents( T ):
     sub_Ts   = [ T.sel(sub_dim) for sub_dim in sub_ds ]                       # select connected sub-hyper-graphs
     lengths  = [ T.shape[0] for T in sub_Ts ]                                 # size of each component
     sub_Ts   = [ sub_Ts[i] for i in np.argsort(lengths) ]                     # arrange in ascending order
+    sT       = sub_Ts[0]                                                      # select largest component
 
-    return sub_Ts
+    return sT

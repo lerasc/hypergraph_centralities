@@ -4,7 +4,7 @@ import pandas   as pd
 import xarray   as xr
 
 from scipy.linalg  import norm
-from hypergraph_centralities.tensor_operations import edge_list_to_tensor, apply, apply_parallel
+from hypergraph_centralities.tensor_operations import edge_list_to_tensor, apply_parallel, is_irreducible
 
 
 def H_centrality( T :       xr.DataArray,
@@ -62,13 +62,14 @@ def H_centrality( T :       xr.DataArray,
     assert len(T.shape) >= 2,                             'T must be at least 2-uniform'
     indices = list(T.indexes.values())                    # indices along each dimension
     for ind in indices: assert ind.equals(indices[0]),    'indices along each dimension must be the same'
+    assert is_irreducible(T),                             'T must be irreducible'
 
     # intialize some basic variables
     ####################################################################################################################
     m     = len( T.shape )                              # tensor dimensionality
     n     = T.shape[0]                                  # number of values along each dimension
     c     = pd.Series( np.ones(n)/n, index=indices[0])  # random initial vector with all positive values and ||c||_1 = 1
-    y     = apply( T, c )                               # first iteration
+    y     = apply_parallel( T, c )                      # first iteration
 
     # iterate the apply-transform until convergene is reached (see Theorem 2.4 in [1]).
     ####################################################################################################################
@@ -90,7 +91,7 @@ def generate_sunflower_HG(  m : int=4,
                             ) -> xr.DataArray:
     """
     This function returns the adjacency tensor of an m-uniform sunflower hypergraph with r petals. See Figure 1 in [1]
-    for a visualization of this graph.
+    for a visualization of this graph. This graph is useful to test the implementation of the centrality measures.
 
     [1] 2019 - Benson - Three hypergraph eigenvector centralities
     """
@@ -104,14 +105,3 @@ def generate_sunflower_HG(  m : int=4,
     T         = edge_list_to_tensor( edges )           # reshape into tensor
 
     return T
-
-
-if __name__=='__main__':
-
-    T = generate_sunflower_HG( m=4, r=5 )
-    x = pd.Series( np.arange(1, T.shape[0]+1), index=np.arange(T.shape[0]) )
-    print(apply( i=None, T=T, x=x ))
-
-    from tensor_operations import apply_parallel
-
-    print(apply_parallel(T=T, x=x))
