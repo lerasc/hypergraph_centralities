@@ -4,12 +4,13 @@ import pandas   as pd
 import xarray   as xr
 
 from scipy.linalg  import norm
-from hypergraph_centralities.tensor_operations import edge_list_to_tensor, apply_parallel, is_irreducible
+from hypergraph_centralities.tensor_operations import edge_list_to_tensor, apply, apply_parallel, is_irreducible
 
 
 def H_centrality( T :       xr.DataArray,
                   tol:      float=1e-4,
                   maxiter:  int=100,
+                  parallel: bool=True,
                 )        -> pd.Series:
     """
     Implementation of an iteration algorithm that calculates an m-uniform hypergraph's leading H-eigenvector. That
@@ -20,6 +21,7 @@ def H_centrality( T :       xr.DataArray,
     T:          An m-order n-dimensional tensor
     tol:        Threshold of relative change across vector components that indicates convergence.
     maxiter:    If algorithm hasn't converged in less than maxiter iterations, an error is raised.
+    parallel:   If True, parallelize the apply-function for faster execution.
 
     return:
     ------
@@ -69,7 +71,8 @@ def H_centrality( T :       xr.DataArray,
     m     = len( T.shape )                              # tensor dimensionality
     n     = T.shape[0]                                  # number of values along each dimension
     c     = pd.Series( np.ones(n)/n, index=indices[0])  # random initial vector with all positive values and ||c||_1 = 1
-    y     = apply_parallel( T, c )                      # first iteration
+    ap    = apply_parallel if parallel else apply       # whether or not to execut in parallel along dimensions of y
+    y     = ap( T, c )                                  # first iteration
 
     # iterate the apply-transform until convergene is reached (see Theorem 2.4 in [1]).
     ####################################################################################################################
@@ -77,7 +80,7 @@ def H_centrality( T :       xr.DataArray,
 
         y_scaled  = y**(1/(m-1))                       # rescale the apply-transform
         c         = y_scaled / norm(y_scaled, 1)       # renormalize to get next interation of eigenvector approximation
-        y         = apply_parallel( T, c )             # apply next transform
+        y         = ap( T, c )                         # apply next transform
         s         = y / c**(m-1)                       # difference between current candiate and rescaled next iteration
         converged = (max(s) - min(s)) / min(s) < tol   # are all entries in y and c^{m-1} roughly the same?
 

@@ -312,6 +312,6 @@ def get_largest_connected_component( T ):
     sub_Ts   = [ T.sel(sub_dim) for sub_dim in sub_ds ]                       # select connected sub-hyper-graphs
     lengths  = [ T.shape[0] for T in sub_Ts ]                                 # size of each component
     sub_Ts   = [ sub_Ts[i] for i in np.argsort(lengths) ]                     # arrange in ascending order
-    sT       = sub_Ts[0]                                                      # select largest component
+    sT       = sub_Ts[-1]                                                     # select largest component
 
     return sT
